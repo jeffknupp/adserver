@@ -7,47 +7,25 @@ import (
 	"path/filepath"
 	"strconv"
 	"time"
+
+	"github.com/jeffknupp/adserver/creative"
 )
-
-type CreativeId int
-
-type Creative struct {
-	Id            CreativeId
-	Height, Width int
-	Path          string
-}
 
 var staticFilePath = filepath.Join("/srv", "www", "adserver", "static")
 
-var adMap = make(map[CreativeId]*Creative)
-var heightIndex = make(map[int][]CreativeId)
-var widthIndex = make(map[int][]CreativeId)
+var adMap = make(map[creative.CreativeId]*creative.Creative)
+var heightIndex = make(map[int][]creative.CreativeId)
+var widthIndex = make(map[int][]creative.CreativeId)
 
-type CreativeStat struct {
-	Impressions   int
-	LastServed    time.Time
-	ServedPerHour map[int]int
-}
+var adStats = make(map[int]*creative.CreativeStat)
 
-var adStats = make(map[int]*CreativeStat)
-var universalCreativeId CreativeId = 0
-
-func getId() CreativeId {
-	universalCreativeId += 1
-	return universalCreativeId
-}
-
-func registerCreative(ad *Creative) {
+func registerCreative(ad *creative.Creative) {
 	adMap[ad.Id] = ad
 	heightIndex[ad.Height] = append(heightIndex[ad.Height], ad.Id)
 	widthIndex[ad.Width] = append(widthIndex[ad.Width], ad.Id)
 }
 
-func NewCreative(path string, width, height int) *Creative {
-	return &Creative{Id: getId(), Height: height, Width: width, Path: path}
-}
-
-func registerImpression(stat *CreativeStat, ad *Creative) {
+func recordImpression(stat *creative.CreativeStat, ad *creative.Creative) {
 	stat.Impressions += 1
 	previousServed := stat.LastServed
 	stat.LastServed = time.Now()
@@ -58,7 +36,7 @@ func registerImpression(stat *CreativeStat, ad *Creative) {
 	log.Printf("Served this hour: [%d]\n", stat.ServedPerHour[time.Now().Hour()])
 }
 
-func getCreative(height, width int) *Creative {
+func getCreative(height, width int) *creative.Creative {
 	heightMatches := heightIndex[height]
 	widthMatches := widthIndex[width]
 	for _, heightMatch := range heightMatches {
@@ -84,7 +62,7 @@ func handleCreativeCall(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, exists := adStats[int(ad.Id)]; exists == false {
-		adStats[int(ad.Id)] = &CreativeStat{0, time.Now(), make(map[int]int, 24)}
+		adStats[int(ad.Id)] = creative.NewCreativeStat()
 	}
 
 	fullPath := filepath.Join(staticFilePath, "images", ad.Path)
@@ -96,13 +74,13 @@ func handleCreativeCall(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, fullPath)
 
 	stat := adStats[int(ad.Id)]
-	registerImpression(stat, ad)
+	recordImpression(stat, ad)
 }
 
 func main() {
 	log.Println("---starting adserver---")
 	http.HandleFunc("/ad", handleCreativeCall)
-	appNexusCreative := NewCreative("appnexus-logo.png", 640, 480)
+	appNexusCreative := creative.NewCreative("appnexus-logo.png", 640, 480)
 	registerCreative(appNexusCreative)
 	http.ListenAndServe(":8081", nil)
 	log.Println("---stopping adserver---")
